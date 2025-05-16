@@ -24,6 +24,7 @@ along with Christoffel.  If not, see <http://www.gnu.org/licenses/>.
 
 import numpy as np
 
+
 # Definition of Voigt notation
 # VOIGT = {00: 0, 11: 1, 22: 2, 12: 3, 21: 3, 02: 4, 20: 4, 01: 5, 10: 5}
 VOIGT = {'00': 0, '11': 1, '22': 2, '12': 3, '21': 3, '02': 4, '20': 4, '01': 5, '10': 5}
@@ -733,3 +734,49 @@ def cofactor(m):
 
     return cof
 
+def plot_energy_velocity_surface(christoffel_solver: Christoffel, samples_phi, samples_theta, assume_symmetry=True):
+    import matplotlib.pyplot as plt 
+    import  matplotlib.colors as mcolors
+    from tqdm import tqdm 
+
+    theta_max = np.pi / 2 if assume_symmetry else 2 * np.pi 
+    phi_max   = np.pi / 2 if assume_symmetry else 2 * np.pi
+
+    phis, thetas = np.linspace(0, phi_max, samples_phi), np.linspace(0, theta_max, samples_theta)
+    phi_vals, theta_vals = np.meshgrid(phis, thetas)
+
+    # Reshape to get all combinations
+    phi_flat = phi_vals.flatten()
+    theta_flat = theta_vals.flatten()
+
+    # Format (nr_gridpoints, nr_wavemodes, 3)
+    group_velocities = np.empty((len(phi_flat), 3, 3))
+    
+
+    combinations = len(phi_flat)
+    
+    # Add progress bar
+    pbar = tqdm(total=combinations, desc="Calculating points")
+
+    # Iterate through all combinations
+    for i in range(combinations):
+        christoffel_solver.set_direction_spherical(theta_flat[i], phi_flat[i])
+        group_velocities[i, :, :] = christoffel_solver.get_group_velocity()
+        pbar.update(i)
+    pbar.close()
+    
+
+    pbar2 = tqdm(total=combinations, desc="Plotting")
+    fig = plt.figure()
+    ax = fig.add_subplot(projection="3d")
+    colors = list(mcolors.BASE_COLORS)
+    for j, gridpoint in enumerate(group_velocities):
+        for i, wavemode in enumerate(gridpoint):
+            ax.scatter(*wavemode, c=colors[i])
+
+        pbar2.update(j)
+
+    plt.show()
+
+
+    
