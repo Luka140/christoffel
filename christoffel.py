@@ -149,6 +149,7 @@ class Christoffel:
                 self.phi = 2.0*np.pi - self.phi
 
         self.christoffel = np.dot(q, np.dot(q, self.stiffness))
+        return self 
 
     def set_direction_spherical(self, theta, phi):
         """
@@ -175,6 +176,7 @@ class Christoffel:
         self.direction = q
 
         self.christoffel = np.dot(q, np.dot(q, self.stiffness))
+        return self 
 
     def set_direction_random(self):
         """
@@ -195,6 +197,7 @@ class Christoffel:
         self.theta = np.arccos(cos_theta)
 
         self.christoffel = np.dot(q, np.dot(q, self.stiffness))
+        return self 
 
 
     def get_bulk(self):
@@ -264,6 +267,11 @@ class Christoffel:
         return self._grad_eig_val
 
     def get_phase_velocity(self):
+        """Returns phase velocity in km/s 
+
+        Returns:
+            np.ndarray: the three phase velocity magnitudes in the set direction
+        """
         if self._phase_velocity is None:
             self.set_phase_velocity()
         return self._phase_velocity
@@ -275,6 +283,12 @@ class Christoffel:
         return self._phase_velocity / self.get_isotropic()
 
     def get_group_velocity(self):
+        """Returns group velocity in km/s 
+
+        Returns:
+            np.ndarray: (3x3) array containing the three velocity vectors.
+                        Each row belongs to a wavemode  
+        """
         if self._group_velocity is None:
             self.set_group_velocity()
         return self._group_velocity
