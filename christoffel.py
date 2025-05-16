@@ -23,6 +23,7 @@ along with Christoffel.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 import numpy as np
+import warnings
 
 
 # Definition of Voigt notation
@@ -54,6 +55,9 @@ class Christoffel:
         self.iso_P, self.iso_S = isotropic_velocities(self.bulk, self.shear, density)
 
         stiffness = 0.5 * ( stiffness + stiffness.T)
+        if np.max(stiffness) > 1e3:
+            warnings.warn(f"The stiffness matrix should be provided in GPa. Maximum component: {np.max(stiffness)}\nMake sure these are the correct unit")
+
         self.stiffness2D = stiffness
         self.stiffness = np.array(de_voigt(stiffness))
         self.stiffness *= 1000.0/density
@@ -734,10 +738,14 @@ def cofactor(m):
 
     return cof
 
-def plot_energy_velocity_surface(christoffel_solver: Christoffel, samples_phi, samples_theta, assume_symmetry=True):
-    import matplotlib.pyplot as plt 
-    import  matplotlib.colors as mcolors
+def plot3d_energy_velocity_surface(christoffel_solver: Christoffel, samples_phi, samples_theta, assume_symmetry=True):
+    # import matplotlib.pyplot as plt 
+    # import  matplotlib.colors as mcolors
     from tqdm import tqdm 
+    import open3d as o3d
+    
+    if christoffel_solver.stiffness is None:
+        raise ValueError("Please provide the christoffel solver initialized with a stiffness and density...")
 
     theta_max = np.pi / 2 if assume_symmetry else 2 * np.pi 
     phi_max   = np.pi / 2 if assume_symmetry else 2 * np.pi
@@ -749,34 +757,119 @@ def plot_energy_velocity_surface(christoffel_solver: Christoffel, samples_phi, s
     phi_flat = phi_vals.flatten()
     theta_flat = theta_vals.flatten()
 
+    modes = 3        
     # Format (nr_gridpoints, nr_wavemodes, 3)
-    group_velocities = np.empty((len(phi_flat), 3, 3))
+    group_velocities = np.empty((len(phi_flat), modes, 3))
     
 
     combinations = len(phi_flat)
     
     # Add progress bar
-    pbar = tqdm(total=combinations, desc="Calculating points")
+    pbar = tqdm(total=combinations, desc=f"Calculating points... Total:{combinations} - ")
 
     # Iterate through all combinations
     for i in range(combinations):
         christoffel_solver.set_direction_spherical(theta_flat[i], phi_flat[i])
         group_velocities[i, :, :] = christoffel_solver.get_group_velocity()
-        pbar.update(i)
+        pbar.update(1)
     pbar.close()
     
+    colors = [np.array([1, 0,0]), np.array([0,1,0]), np.array([0,0,1])]
+    wavemode_pcls = [o3d.geometry.PointCloud(o3d.utility.Vector3dVector(group_velocities[:,mode_index,:])).paint_uniform_color(colors[mode_index]) for mode_index in range(modes)]
 
-    pbar2 = tqdm(total=combinations, desc="Plotting")
-    fig = plt.figure()
-    ax = fig.add_subplot(projection="3d")
-    colors = list(mcolors.BASE_COLORS)
-    for j, gridpoint in enumerate(group_velocities):
-        for i, wavemode in enumerate(gridpoint):
-            ax.scatter(*wavemode, c=colors[i])
+    o3d.visualization.draw_geometries(wavemode_pcls)
 
-        pbar2.update(j)
-
-    plt.show()
-
-
+def plot_energy_velocity_slice(christoffel_solver, angular_samples, plane='xy', assume_symmetry=True):
+    import matplotlib.pyplot as plt 
+    import numpy as np
+    from tqdm import tqdm 
     
+    # Validate plane parameter
+    if plane not in ('xy', 'xz'):
+        raise ValueError(f"Plane must be either 'xy' or 'xz' - got: {plane}")
+    
+    # Set sampling parameters
+    samples = angular_samples
+    
+    if plane == 'xy':
+        # For xy-plane, set theta = pi/2 (equator) and vary phi
+        theta_val = np.pi/2  # Fixed theta at equator
+        phi_max = 2 * np.pi if not assume_symmetry else np.pi
+        phi_vals = np.linspace(0, phi_max, samples)
+        
+        # Initialize arrays for storing results
+        modes = 3
+        x_points = [[] for _ in range(modes)]
+        y_points = [[] for _ in range(modes)]
+        
+        # Calculate group velocities
+        for phi in tqdm(phi_vals, desc="Calculating points"):
+            christoffel_solver.set_direction_spherical(theta_val, phi)
+            group_vels = christoffel_solver.get_group_velocity()
+            
+            for mode in range(modes):
+                x_points[mode].append(group_vels[mode, 0])  # x component
+                y_points[mode].append(group_vels[mode, 1])  # y component
+    
+    else:  # xz-plane
+        # For xz-plane, set phi = 0 (x-axis) and vary theta
+        phi_val = 0  # Fixed phi along x-axis
+        theta_max = np.pi if not assume_symmetry else np.pi/2
+        theta_vals = np.linspace(0, theta_max, samples)
+        
+        # Initialize arrays for storing results
+        modes = 3
+        x_points = [[] for _ in range(modes)]
+        z_points = [[] for _ in range(modes)]
+        
+        # Calculate group velocities
+        for theta in tqdm(theta_vals, desc="Calculating points"):
+            christoffel_solver.set_direction_spherical(theta, phi_val)
+            group_vels = christoffel_solver.get_group_velocity()
+            
+            for mode in range(modes):
+                x_points[mode].append(group_vels[mode, 0])  # x component
+                z_points[mode].append(group_vels[mode, 2])  # z component
+    
+    # Create the plot
+    fig, ax = plt.subplots(figsize=(10, 8))
+    
+    # Define colors for each mode
+    colors = ['red', 'blue', 'green']
+    labels = ['Mode 1', 'Mode 2', 'Mode 3']
+    
+    # Plot each mode as a line
+    for i in range(modes):
+        if plane == 'xy':
+            ax.plot(x_points[i], y_points[i], color=colors[i], label=labels[i], linewidth=2)
+        else:  # xz-plane
+            ax.plot(x_points[i], z_points[i], color=colors[i], label=labels[i], linewidth=2)
+    
+    # # Add reference circle for unit velocity
+    # theta_circle = np.linspace(0, 2*np.pi, 100)
+    # ax.plot(np.cos(theta_circle), np.sin(theta_circle), 'k--', alpha=0.5, label='Unit velocity')
+    
+    # Set labels and title
+    ax.set_xlabel("X component: (km/s)")
+    if plane == 'xy':
+        ax.set_ylabel('Y Component (km/s)')
+        ax.set_title('Energy Velocity in X-Y Plane')
+    else:
+        ax.set_xlabel('X Component (km/s)')
+        ax.set_title('Energy Velocity in X-Z Plane')
+    
+    # Add grid and equal aspect ratio
+    ax.grid(True, linestyle='--', alpha=0.7)
+    ax.set_aspect('equal')
+    
+    # Add legend
+    ax.legend(loc='best')
+    
+    # Set axis limits to be slightly larger than the data
+    points2 = y_points if plane == 'xy' else z_points
+    max_val = 1.1 * np.max(np.abs(np.hstack((x_points, points2))))
+    ax.set_xlim(-max_val, max_val)
+    ax.set_ylim(-max_val, max_val)
+    
+    plt.tight_layout()
+    plt.show()
