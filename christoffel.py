@@ -310,11 +310,24 @@ class Christoffel:
         return self._group_dir
 
     def get_group_theta(self):
+        """Get azimuthal angle of the group velocity. Angle between the group direction and x3 direction.
+        Equivalent to arccos(group_velocity[2]) (magnitude group velocity direction = 1)
+
+        Returns:
+            np.ndarray: Array of three angles (in radians), one for each wavemode
+        """
         if self.group_theta is None:
             self.set_group_velocity()
         return self.group_theta
 
     def get_group_phi(self):
+        """Get the angle between the group velocity and the x1 - x3 plane (horizontal skew).
+           Equivalent to arctan(group_velocity[1] / group_velocity[0]).
+
+
+        Returns:
+            np.ndarray: Array of three angles (in radians), one for each wavemode
+        """
         if self.group_phi is None:
             self.set_group_velocity()
         return self.group_phi
