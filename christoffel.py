@@ -738,11 +738,12 @@ def cofactor(m):
 
     return cof
 
-def plot3d_energy_velocity_surface(christoffel_solver: Christoffel, samples_phi, samples_theta, assume_symmetry=True):
+def plot3d_energy_velocity_surface(christoffel_solver: Christoffel, samples_phi, samples_theta, assume_symmetry=True, plot_axes=False):
     # import matplotlib.pyplot as plt 
     # import  matplotlib.colors as mcolors
     from tqdm import tqdm 
     import open3d as o3d
+    import numpy as np
     
     if christoffel_solver.stiffness is None:
         raise ValueError("Please provide the christoffel solver initialized with a stiffness and density...")
@@ -777,7 +778,191 @@ def plot3d_energy_velocity_surface(christoffel_solver: Christoffel, samples_phi,
     colors = [np.array([1, 0,0]), np.array([0,1,0]), np.array([0,0,1])]
     wavemode_pcls = [o3d.geometry.PointCloud(o3d.utility.Vector3dVector(group_velocities[:,mode_index,:])).paint_uniform_color(colors[mode_index]) for mode_index in range(modes)]
 
+    if plot_axes:
+        # Create a coordinate frame
+        coordinate_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=5, origin=[0, 0, 0])
+        wavemode_pcls.append(coordinate_frame)
+    
+    # Visualize all geometries
     o3d.visualization.draw_geometries(wavemode_pcls)
+
+
+# def plot3d_principal_energy_directions(christoffel_solver: Christoffel, samples_phi, samples_theta, assume_symmetry=True, plot_axes=False):
+#     from tqdm import tqdm 
+#     import open3d as o3d
+#     import numpy as np
+    
+#     if christoffel_solver.stiffness is None:
+#         raise ValueError("Please provide the christoffel solver initialized with a stiffness and density...")
+
+#     theta_max = np.pi / 2 if assume_symmetry else 2 * np.pi 
+#     phi_max   = np.pi / 2 if assume_symmetry else 2 * np.pi
+
+#     phis, thetas = np.linspace(0, phi_max, samples_phi), np.linspace(0, theta_max, samples_theta)
+#     phi_vals, theta_vals = np.meshgrid(phis, thetas)
+
+#     # Reshape to get all combinations
+#     phi_flat = phi_vals.flatten()
+#     theta_flat = theta_vals.flatten()
+
+#     modes = 3        
+#     # Format (nr_gridpoints, nr_wavemodes, 3)
+#     enhancement_factors = np.empty((len(phi_flat), modes, 3))
+    
+
+#     combinations = len(phi_flat)
+    
+#     # Add progress bar
+#     pbar = tqdm(total=combinations, desc=f"Calculating points... Total:{combinations} - ")
+
+#     # Iterate through all combinations
+#     for i in range(combinations):
+#         christoffel_solver.set_direction_spherical(theta_flat[i], phi_flat[i])
+#         unit_vector = christoffel_solver.get_direction()
+#         unit_vector /= np.linalg.norm(unit_vector)
+
+#         enhancements = christoffel_solver.get_enhancement(approx=True)
+#         for mode in range(modes):
+            
+#             enhancement_factors[i, mode, :] = enhancements[mode] * unit_vector
+#         pbar.update(1)
+#     pbar.close()
+    
+#     colors = [np.array([1, 0,0]), np.array([0,1,0]), np.array([0,0,1])]
+#     wavemode_pcls = [o3d.geometry.PointCloud(o3d.utility.Vector3dVector(enhancement_factors[:,mode_index,:])).paint_uniform_color(colors[mode_index]) for mode_index in range(modes)]
+
+#     if plot_axes:
+#         # Create a coordinate frame
+#         coordinate_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=5, origin=[0, 0, 0])
+#         wavemode_pcls.append(coordinate_frame)
+    
+#     # Visualize all geometries
+#     o3d.visualization.draw_geometries(wavemode_pcls)
+
+def plot3d_principal_energy_directions(christoffel_solver: Christoffel, samples_phi, samples_theta, 
+                                      wavemode=0, assume_symmetry=True, plot_axes=False, 
+                                      colormap_type="rainbow"):
+    from tqdm import tqdm 
+    import open3d as o3d
+    import numpy as np
+    
+    if christoffel_solver.stiffness is None:
+        raise ValueError("Please provide the christoffel solver initialized with a stiffness and density...")
+
+    # Validate wavemode selection
+    if wavemode not in [0, 1, 2]:
+        raise ValueError("wavemode must be 0, 1, or 2")
+        
+    theta_max = np.pi / 2 if assume_symmetry else 2 * np.pi 
+    phi_max   = np.pi / 2 if assume_symmetry else 2 * np.pi
+
+    phis, thetas = np.linspace(0, phi_max, samples_phi), np.linspace(0, theta_max, samples_theta)
+    phi_vals, theta_vals = np.meshgrid(phis, thetas)
+
+    # Reshape to get all combinations
+    phi_flat = phi_vals.flatten()
+    theta_flat = theta_vals.flatten()
+
+    modes = 3
+    # Store enhancement magnitudes for coloring
+    enhancement_magnitudes = np.empty(len(phi_flat))
+    
+    combinations = len(phi_flat)
+    
+    # Add progress bar
+    pbar = tqdm(total=combinations, desc=f"Calculating points... Total:{combinations} - ")
+
+    # Iterate through all combinations
+    for i in range(combinations):
+        christoffel_solver.set_direction_spherical(theta_flat[i], phi_flat[i])
+        enhancements = christoffel_solver.get_enhancement(approx=True)
+        # Store the magnitude of the enhancement for the selected wavemode
+        enhancement_magnitudes[i] = np.linalg.norm(enhancements[wavemode])
+        pbar.update(1)
+    pbar.close()
+    
+    # Create a sphere mesh
+    sphere = o3d.geometry.TriangleMesh.create_sphere(radius=1.0, resolution=20)
+    sphere.compute_vertex_normals()
+    
+    # Get vertices of the sphere
+    vertices = np.asarray(sphere.vertices)
+    
+    # Map each vertex to the closest direction in our calculated grid
+    vertex_colors = np.zeros((len(vertices), 3))
+    
+    # Normalize enhancement factors for coloring
+    min_enhancement = np.min(enhancement_magnitudes)
+    max_enhancement = np.max(enhancement_magnitudes)
+    normalized_enhancements = (enhancement_magnitudes - min_enhancement) / (max_enhancement - min_enhancement)
+    
+    # Create a colormap
+    if colormap_type == "rainbow":
+        colormap = create_rainbow_colormap(normalized_enhancements)
+    else:
+        # Default to grayscale
+        colormap = create_grayscale_colormap(normalized_enhancements)
+    
+    # For each vertex in the sphere
+    for i, vertex in enumerate(vertices):
+        # Convert cartesian to spherical coordinates
+        r = np.linalg.norm(vertex)
+        if r < 1e-10:  # Avoid division by zero
+            theta = 0
+            phi = 0
+        else:
+            theta = np.arccos(vertex[2] / r)
+            phi = np.arctan2(vertex[1], vertex[0])
+            if phi < 0:
+                phi += 2 * np.pi
+        
+        # Find the closest point in our grid
+        theta_idx = np.argmin(np.abs(theta - theta_flat))
+        phi_idx = np.argmin(np.abs(phi - phi_flat))
+        
+        # Use the closest point's enhancement factor for coloring
+        closest_idx = theta_idx if np.abs(theta - theta_flat[theta_idx]) < np.abs(phi - phi_flat[phi_idx]) else phi_idx
+        vertex_colors[i] = colormap[closest_idx]
+    
+    # Apply colors to the sphere
+    sphere.vertex_colors = o3d.utility.Vector3dVector(vertex_colors)
+    
+    geometries = [sphere]
+    
+    if plot_axes:
+        # Create a coordinate frame
+        coordinate_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=1.5, origin=[0, 0, 0])
+        geometries.append(coordinate_frame)
+    
+    # Visualize
+    o3d.visualization.draw_geometries(geometries)
+
+def create_rainbow_colormap(values):
+    """Create a rainbow colormap for the given values (0-1)"""
+    colors = np.zeros((len(values), 3))
+    for i, v in enumerate(values):
+        # Simple rainbow: red (0) -> yellow -> green -> cyan -> blue (1)
+        if v < 0.25:
+            # Red to Yellow
+            colors[i] = [1, 4*v, 0]
+        elif v < 0.5:
+            # Yellow to Green
+            colors[i] = [2-4*(v-0.25), 1, 0]
+        elif v < 0.75:
+            # Green to Cyan
+            colors[i] = [0, 1, 4*(v-0.5)]
+        else:
+            # Cyan to Blue
+            colors[i] = [0, 2-4*(v-0.75), 1]
+    return colors
+
+def create_grayscale_colormap(values):
+    """Create a grayscale colormap for the given values (0-1)"""
+    colors = np.zeros((len(values), 3))
+    for i, v in enumerate(values):
+        colors[i] = [v, v, v]
+    return colors
+
 
 def plot_energy_velocity_slice(christoffel_solver, angular_samples, plane='xy', assume_symmetry=True):
     import matplotlib.pyplot as plt 
@@ -814,7 +999,7 @@ def plot_energy_velocity_slice(christoffel_solver, angular_samples, plane='xy', 
     else:  # xz-plane
         # For xz-plane, set phi = 0 (x-axis) and vary theta
         phi_val = 0  # Fixed phi along x-axis
-        theta_max = np.pi if not assume_symmetry else np.pi/2
+        theta_max = 2 * np.pi if not assume_symmetry else np.pi/2
         theta_vals = np.linspace(0, theta_max, samples)
         
         # Initialize arrays for storing results
@@ -841,9 +1026,9 @@ def plot_energy_velocity_slice(christoffel_solver, angular_samples, plane='xy', 
     # Plot each mode as a line
     for i in range(modes):
         if plane == 'xy':
-            ax.plot(x_points[i], y_points[i], color=colors[i], label=labels[i], linewidth=2)
+            ax.scatter(x_points[i], y_points[i], color=colors[i], label=labels[i], s=3, alpha=.8)
         else:  # xz-plane
-            ax.plot(x_points[i], z_points[i], color=colors[i], label=labels[i], linewidth=2)
+            ax.scatter(x_points[i], z_points[i], color=colors[i], label=labels[i], s=3, alpha=.8)
     
     # # Add reference circle for unit velocity
     # theta_circle = np.linspace(0, 2*np.pi, 100)
@@ -855,7 +1040,7 @@ def plot_energy_velocity_slice(christoffel_solver, angular_samples, plane='xy', 
         ax.set_ylabel('Y Component (km/s)')
         ax.set_title('Energy Velocity in X-Y Plane')
     else:
-        ax.set_xlabel('X Component (km/s)')
+        ax.set_ylabel('Z Component (km/s)')
         ax.set_title('Energy Velocity in X-Z Plane')
     
     # Add grid and equal aspect ratio
