@@ -839,12 +839,16 @@ def plot3d_energy_velocity_surface(christoffel_solver: Christoffel, samples_phi,
 #     # Visualize all geometries
 #     o3d.visualization.draw_geometries(wavemode_pcls)
 
+
+
 def plot3d_principal_energy_directions(christoffel_solver: Christoffel, samples_phi, samples_theta, 
                                       wavemode=0, assume_symmetry=True, plot_axes=False, 
-                                      colormap_type="rainbow"):
+                                      colormap_name="magma"):
     from tqdm import tqdm 
     import open3d as o3d
     import numpy as np
+    import matplotlib.pyplot as plt
+    import matplotlib.cm as cm
     
     if christoffel_solver.stiffness is None:
         raise ValueError("Please provide the christoffel solver initialized with a stiffness and density...")
@@ -896,12 +900,9 @@ def plot3d_principal_energy_directions(christoffel_solver: Christoffel, samples_
     max_enhancement = np.max(enhancement_magnitudes)
     normalized_enhancements = (enhancement_magnitudes - min_enhancement) / (max_enhancement - min_enhancement)
     
-    # Create a colormap
-    if colormap_type == "rainbow":
-        colormap = create_rainbow_colormap(normalized_enhancements)
-    else:
-        # Default to grayscale
-        colormap = create_grayscale_colormap(normalized_enhancements)
+    # Create a colormap using matplotlib
+    cmap = plt.get_cmap(colormap_name)
+    colormap = np.array([cmap(v)[:3] for v in normalized_enhancements])
     
     # For each vertex in the sphere
     for i, vertex in enumerate(vertices):
