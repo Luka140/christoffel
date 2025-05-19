@@ -875,20 +875,6 @@ def plot3d_principal_energy_directions(christoffel_solver: Christoffel, samples_
     unit_sphere_x = np.sin(theta_flat) * np.cos(phi_flat)
     unit_sphere = np.hstack((np.expand_dims(unit_sphere_x, 1), np.expand_dims(unit_sphere_y, 1), np.expand_dims(unit_sphere_z,1)))
 
-    # # For each vertex in the sphere
-    # pbar2 = tqdm(total=vertices.size, desc=f"Finding vertex colors... Total:{vertices.size} - ")
-    # for i, vertex in enumerate(vertices):
-    #     # Find the closest point in our grid
-    #     closest_idx = np.argmin(np.linalg.norm(np.abs(unit_sphere - vertex), axis=1))
-    #     # Use the closest point's enhancement factor for coloring
-    #     vertex_colors[i, :] = colormap[closest_idx, :]
-    #     pbar2.update(1)
-
-    # # Apply colors to the sphere
-    # sphere.vertex_colors = o3d.utility.Vector3dVector(vertex_colors)
-    # pbar2.close()
-    # geometries = [sphere]
-
     # Chunked vectorized approach
     chunk_size = 1000  # Adjust based on available memory
     num_vertices = len(vertices)
