@@ -787,68 +787,14 @@ def plot3d_energy_velocity_surface(christoffel_solver: Christoffel, samples_phi,
     o3d.visualization.draw_geometries(wavemode_pcls)
 
 
-# def plot3d_principal_energy_directions(christoffel_solver: Christoffel, samples_phi, samples_theta, assume_symmetry=True, plot_axes=False):
-#     from tqdm import tqdm 
-#     import open3d as o3d
-#     import numpy as np
-    
-#     if christoffel_solver.stiffness is None:
-#         raise ValueError("Please provide the christoffel solver initialized with a stiffness and density...")
-
-#     theta_max = np.pi / 2 if assume_symmetry else 2 * np.pi 
-#     phi_max   = np.pi / 2 if assume_symmetry else 2 * np.pi
-
-#     phis, thetas = np.linspace(0, phi_max, samples_phi), np.linspace(0, theta_max, samples_theta)
-#     phi_vals, theta_vals = np.meshgrid(phis, thetas)
-
-#     # Reshape to get all combinations
-#     phi_flat = phi_vals.flatten()
-#     theta_flat = theta_vals.flatten()
-
-#     modes = 3        
-#     # Format (nr_gridpoints, nr_wavemodes, 3)
-#     enhancement_factors = np.empty((len(phi_flat), modes, 3))
-    
-
-#     combinations = len(phi_flat)
-    
-#     # Add progress bar
-#     pbar = tqdm(total=combinations, desc=f"Calculating points... Total:{combinations} - ")
-
-#     # Iterate through all combinations
-#     for i in range(combinations):
-#         christoffel_solver.set_direction_spherical(theta_flat[i], phi_flat[i])
-#         unit_vector = christoffel_solver.get_direction()
-#         unit_vector /= np.linalg.norm(unit_vector)
-
-#         enhancements = christoffel_solver.get_enhancement(approx=True)
-#         for mode in range(modes):
-            
-#             enhancement_factors[i, mode, :] = enhancements[mode] * unit_vector
-#         pbar.update(1)
-#     pbar.close()
-    
-#     colors = [np.array([1, 0,0]), np.array([0,1,0]), np.array([0,0,1])]
-#     wavemode_pcls = [o3d.geometry.PointCloud(o3d.utility.Vector3dVector(enhancement_factors[:,mode_index,:])).paint_uniform_color(colors[mode_index]) for mode_index in range(modes)]
-
-#     if plot_axes:
-#         # Create a coordinate frame
-#         coordinate_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=5, origin=[0, 0, 0])
-#         wavemode_pcls.append(coordinate_frame)
-    
-#     # Visualize all geometries
-#     o3d.visualization.draw_geometries(wavemode_pcls)
-
-
-
 def plot3d_principal_energy_directions(christoffel_solver: Christoffel, samples_phi, samples_theta, 
                                       wavemode=0, assume_symmetry=True, plot_axes=False, 
-                                      colormap_name="magma"):
+                                      colormap_name="magma", approx=False, plot_log=True):
     from tqdm import tqdm 
     import open3d as o3d
     import numpy as np
     import matplotlib.pyplot as plt
-    import matplotlib.cm as cm
+    from matplotlib.colors import LogNorm, Normalize
     
     if christoffel_solver.stiffness is None:
         raise ValueError("Please provide the christoffel solver initialized with a stiffness and density...")
@@ -879,14 +825,15 @@ def plot3d_principal_energy_directions(christoffel_solver: Christoffel, samples_
     # Iterate through all combinations
     for i in range(combinations):
         christoffel_solver.set_direction_spherical(theta_flat[i], phi_flat[i])
-        enhancements = christoffel_solver.get_enhancement(approx=True)
+        enhancements = christoffel_solver.get_enhancement(approx=approx)
         # Store the magnitude of the enhancement for the selected wavemode
-        enhancement_magnitudes[i] = np.linalg.norm(enhancements[wavemode])
+        enhancement_magnitudes[i] = enhancements[wavemode]
         pbar.update(1)
     pbar.close()
     
     # Create a sphere mesh
-    sphere = o3d.geometry.TriangleMesh.create_sphere(radius=1.0, resolution=20)
+    res = max(samples_phi, samples_theta)
+    sphere = o3d.geometry.TriangleMesh.create_sphere(radius=1.0, resolution=res)
     sphere.compute_vertex_normals()
     
     # Get vertices of the sphere
@@ -895,48 +842,106 @@ def plot3d_principal_energy_directions(christoffel_solver: Christoffel, samples_
     # Map each vertex to the closest direction in our calculated grid
     vertex_colors = np.zeros((len(vertices), 3))
     
-    # Normalize enhancement factors for coloring
+    # Get min and max enhancement values
     min_enhancement = np.min(enhancement_magnitudes)
     max_enhancement = np.max(enhancement_magnitudes)
-    normalized_enhancements = (enhancement_magnitudes - min_enhancement) / (max_enhancement - min_enhancement)
     
+    # Handle possible negative or zero values for log scale
+    if plot_log:
+        # Ensure all values are positive for log scale
+        if min_enhancement <= 0:
+            # Find the smallest positive value or use a small constant
+            min_positive = np.min(enhancement_magnitudes[enhancement_magnitudes > 0]) if np.any(enhancement_magnitudes > 0) else 1e-10
+            # Shift all values to be positive
+            enhancement_magnitudes = np.maximum(enhancement_magnitudes, min_positive)
+            min_enhancement = min_positive
+        
+        # Use LogNorm for logarithmic color scaling
+        norm = LogNorm(vmin=min_enhancement, vmax=max_enhancement)
+        normalized_enhancements = norm(enhancement_magnitudes)
+    else:
+        # Use linear normalization
+        norm = Normalize(vmin=min_enhancement, vmax=max_enhancement)
+        normalized_enhancements = norm(enhancement_magnitudes)
+    
+    print(f"Max enhancement factor: {max_enhancement:.2f} at theta: {theta_flat[np.argmax(enhancement_magnitudes)]*180/np.pi:.2f} deg - phi: {phi_flat[np.argmax(enhancement_magnitudes)] * 180/np.pi:.2f} deg")
+
     # Create a colormap using matplotlib
     cmap = plt.get_cmap(colormap_name)
     colormap = np.array([cmap(v)[:3] for v in normalized_enhancements])
     
-    # For each vertex in the sphere
-    for i, vertex in enumerate(vertices):
-        # Convert cartesian to spherical coordinates
-        r = np.linalg.norm(vertex)
-        if r < 1e-10:  # Avoid division by zero
-            theta = 0
-            phi = 0
-        else:
-            theta = np.arccos(vertex[2] / r)
-            phi = np.arctan2(vertex[1], vertex[0])
-            if phi < 0:
-                phi += 2 * np.pi
+    unit_sphere_z = np.cos(theta_flat) 
+    unit_sphere_y = np.sin(theta_flat) * np.sin(phi_flat)
+    unit_sphere_x = np.sin(theta_flat) * np.cos(phi_flat)
+    unit_sphere = np.hstack((np.expand_dims(unit_sphere_x, 1), np.expand_dims(unit_sphere_y, 1), np.expand_dims(unit_sphere_z,1)))
+
+    # # For each vertex in the sphere
+    # pbar2 = tqdm(total=vertices.size, desc=f"Finding vertex colors... Total:{vertices.size} - ")
+    # for i, vertex in enumerate(vertices):
+    #     # Find the closest point in our grid
+    #     closest_idx = np.argmin(np.linalg.norm(np.abs(unit_sphere - vertex), axis=1))
+    #     # Use the closest point's enhancement factor for coloring
+    #     vertex_colors[i, :] = colormap[closest_idx, :]
+    #     pbar2.update(1)
+
+    # # Apply colors to the sphere
+    # sphere.vertex_colors = o3d.utility.Vector3dVector(vertex_colors)
+    # pbar2.close()
+    # geometries = [sphere]
+
+    # Chunked vectorized approach
+    chunk_size = 1000  # Adjust based on available memory
+    num_vertices = len(vertices)
+    vertex_colors = np.zeros((num_vertices, 3))
+
+    pbar2 = tqdm(total=num_vertices / chunk_size, desc=f"Finding vertex colors...")
+    for i in range(0, num_vertices, chunk_size):
+        end_idx = min(i + chunk_size, num_vertices)
+        chunk_vertices = vertices[i:end_idx]
         
-        # Find the closest point in our grid
-        theta_idx = np.argmin(np.abs(theta - theta_flat))
-        phi_idx = np.argmin(np.abs(phi - phi_flat))
+        # Calculate distances for this chunk
+        chunk_distances = np.linalg.norm(np.abs(chunk_vertices[:, np.newaxis, :] - unit_sphere[np.newaxis, :, :]), axis=2)
         
-        # Use the closest point's enhancement factor for coloring
-        closest_idx = theta_idx if np.abs(theta - theta_flat[theta_idx]) < np.abs(phi - phi_flat[phi_idx]) else phi_idx
-        vertex_colors[i] = colormap[closest_idx]
-    
+        # Find closest indices for this chunk
+        chunk_closest_indices = np.argmin(chunk_distances, axis=1)
+        
+        # Assign colors for this chunk
+        vertex_colors[i:end_idx] = colormap[chunk_closest_indices]
+        pbar2.update(1)
+
     # Apply colors to the sphere
     sphere.vertex_colors = o3d.utility.Vector3dVector(vertex_colors)
-    
     geometries = [sphere]
+
+    pbar2.close()
+
     
     if plot_axes:
         # Create a coordinate frame
-        coordinate_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=1.5, origin=[0, 0, 0])
+        coordinate_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=1.02, origin=[0, 0, 0])
         geometries.append(coordinate_frame)
+
+        bounding_box = sphere.get_oriented_bounding_box()
+        bounding_box.color = (1,0,0)
+        geometries.append(bounding_box)
+
+    # Create colorbar with appropriate normalization
+    fig, ax = plt.subplots(figsize=(1, 5))
+    cmap = plt.get_cmap(colormap_name)
+    
+    # Use the same normalization for the colorbar as for the data
+    cb = fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=cmap), 
+                     cax=ax, orientation='vertical')
+    cb.set_label('Enhancement Factor')
+    plt.tight_layout()
+    
+    # Save to a temporary file and load as an Open3D image
+    plt.savefig('temp_colorbar.png', dpi=100, bbox_inches='tight')
+    plt.close(fig)
     
     # Visualize
-    o3d.visualization.draw_geometries(geometries)
+    o3d.visualization.draw_geometries(geometries, up=(0,0,1), front=(1,0,0))
+
 
 def create_rainbow_colormap(values):
     """Create a rainbow colormap for the given values (0-1)"""
