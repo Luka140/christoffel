@@ -1050,3 +1050,119 @@ def plot_energy_velocity_slice(christoffel_solver, angular_samples, plane='xy', 
     
     plt.tight_layout()
     plt.show()
+
+
+def plot_enhancement_factors_slice(christoffel_solver, angular_samples, plane='xy', 
+                                 wavemode=None, approx=False, 
+                                 normalize_radius=True,
+                                 plot_dB=False):
+    import matplotlib.pyplot as plt 
+    import numpy as np
+    from tqdm import tqdm 
+    
+    if christoffel_solver.stiffness is None:
+        raise ValueError("Please provide the christoffel solver initialized with a stiffness and density...")
+    
+    # Handle wavemode parameter
+    if wavemode is None:
+        wavemode = [0, 1, 2]
+    elif isinstance(wavemode, int):
+        wavemode = [wavemode]
+
+    # Validate wavemode selection
+    if not set(wavemode).issubset({0, 1, 2}):
+        raise ValueError("wavemode must be 0, 1, or 2")
+    
+    # Validate plane parameter
+    if plane not in ('xy', 'xz'):
+        raise ValueError(f"Plane must be either 'xy' or 'xz' - got: {plane}")
+    
+    # Set up angular sampling
+    enhancement_values = []
+    if plane == 'xy':
+        # For xy-plane, set theta = pi/2 (equator) and vary phi
+        phi_max = 2 * np.pi 
+        phi_vals = np.linspace(0, phi_max, angular_samples)
+        theta_vals = np.full_like(phi_vals, np.pi/2)  # Fixed theta at equator
+        angles = phi_vals
+    else:  # xz-plane
+        # For xz-plane, set phi = 0 (x-axis) and vary theta
+        theta_max = 2 * np.pi
+        theta_vals = np.linspace(0, theta_max, angular_samples)
+        phi_vals = np.zeros_like(theta_vals) # Fixed phi along x-axis
+        angles = theta_vals
+        
+    # Calculate enhancement factors
+    for i, _ in enumerate(tqdm(theta_vals, desc="Calculating enhancement factors")):
+        christoffel_solver.set_direction_spherical(theta_vals[i], phi_vals[i])
+        enhancements = christoffel_solver.get_enhancement(approx=approx)
+        # Collect enhancement for all requested wavemodes
+        enhancement_values.append([enhancements[wm] for wm in wavemode])
+    
+    # Convert to numpy arrays
+    enhancement_values = np.array(enhancement_values)  # shape (samples, len(wavemode))
+        
+    # Handle negative enhancement values
+    min_enhancement = np.min(enhancement_values)
+    max_enhancement = np.max(enhancement_values)
+    
+    # Ensure all radii are positive
+    if min_enhancement <= 0:
+        # Shift all values to be positive
+        enhancement_values = enhancement_values - min_enhancement + 0.1
+        print(f"Warning: Negative enhancement values detected. Shifted by {-min_enhancement + 0.1:.3f}")
+    
+    radii = enhancement_values.copy()
+
+    if plot_dB:
+        radii = 10 * np.log10(enhancement_values)
+
+    # Normalize radii if requested
+    if normalize_radius:
+        radii = radii / np.max(radii, axis=0)  # Normalize each mode separately
+    
+    coord_label = 'Y' if plane == 'xy' else 'Z'
+    
+    # Print statistics for each mode
+    for idx, wm in enumerate(wavemode):
+        max_idx = np.argmax(enhancement_values[:, idx])
+        original_max = np.max(enhancement_values[:, idx])
+        print(f"Mode {wm} - Max enhancement factor: {original_max:.2f} at theta: {theta_vals[max_idx]*180/np.pi:.1f}° - phi: {phi_vals[max_idx]*180/np.pi:.1f}°")
+    
+    # Create the plot
+    fig, ax = plt.subplots(figsize=(10, 8), subplot_kw=dict(projection='polar'))
+    
+    # Define colors and labels for each mode
+    colors = ['red', 'blue', 'green']
+    labels = [f'Mode {wm}' for wm in wavemode]
+    
+    # Plot each wavemode
+    for idx, wm in enumerate(wavemode):
+        color = colors[idx % len(colors)]
+        ax.plot(angles, radii[:, idx], color=color, linewidth=2, alpha=0.8, label=labels[idx])
+        ax.scatter(angles, radii[:, idx], color=color, s=10, alpha=0.8)
+    
+    # Create title
+    if len(wavemode) == 1:
+        title = f'Enhancement Factors (Mode {wavemode[0]}) in X-{coord_label} Plane\n(Radius = '
+    else:
+        title = f'Enhancement Factors (Modes {wavemode}) in X-{coord_label} Plane\n(Radius = '
+    
+    if plot_dB:
+        title += '10log₁₀(Enhancement Factor)'
+    else:
+        title += 'Enhancement Factor'
+    if normalize_radius:
+        title += ' (normalized)'
+    title += ")"
+    
+    ax.set_title(title, pad=20)
+    
+    # Add legend if multiple modes
+    if len(wavemode) > 1:
+        ax.legend(loc='upper right', bbox_to_anchor=(1.1, 1.1))
+    
+    plt.tight_layout()
+    plt.show()
+    
+    return enhancement_values, radii
