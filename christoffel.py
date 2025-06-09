@@ -789,7 +789,8 @@ def plot3d_energy_velocity_surface(christoffel_solver: Christoffel, samples_phi,
 
 def plot3d_principal_energy_directions(christoffel_solver: Christoffel, samples_phi, samples_theta, 
                                       wavemode=0, assume_symmetry=True, plot_axes=False, 
-                                      colormap_name="magma", approx=False, plot_log=True):
+                                      colormap_name="magma", approx=False, plot_log=True,
+                                      weigh_by_x3_polarisation=False):
     from tqdm import tqdm 
     import open3d as o3d
     import numpy as np
@@ -828,6 +829,9 @@ def plot3d_principal_energy_directions(christoffel_solver: Christoffel, samples_
         enhancements = christoffel_solver.get_enhancement(approx=approx)
         # Store the magnitude of the enhancement for the selected wavemode
         enhancement_magnitudes[i] = enhancements[wavemode]
+        if weigh_by_x3_polarisation:
+            enhancement_magnitudes[i] *= np.abs(christoffel_solver.get_eigenvec()[wavemode][2])
+
         pbar.update(1)
     pbar.close()
     
@@ -904,7 +908,7 @@ def plot3d_principal_energy_directions(christoffel_solver: Christoffel, samples_
     
     if plot_axes:
         # Create a coordinate frame
-        coordinate_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=1.02, origin=[0, 0, 0])
+        coordinate_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=1.05, origin=[0, 0, 0])
         geometries.append(coordinate_frame)
 
         bounding_box = sphere.get_oriented_bounding_box()
@@ -1055,7 +1059,7 @@ def plot_energy_velocity_slice(christoffel_solver, angular_samples, plane='xy', 
 def plot_enhancement_factors_slice(christoffel_solver, angular_samples, plane='xy', 
                                  wavemode=None, approx=False, 
                                  normalize_radius=True,
-                                 plot_dB=False):
+                                 plot_dB=False, weigh_by_x3_polarisation=False):
     import matplotlib.pyplot as plt 
     import numpy as np
     from tqdm import tqdm 
@@ -1079,6 +1083,9 @@ def plot_enhancement_factors_slice(christoffel_solver, angular_samples, plane='x
     
     # Set up angular sampling
     enhancement_values = []
+    if weigh_by_x3_polarisation:
+        x3_polarisation = []
+
     if plane == 'xy':
         # For xy-plane, set theta = pi/2 (equator) and vary phi
         phi_max = 2 * np.pi 
@@ -1098,20 +1105,24 @@ def plot_enhancement_factors_slice(christoffel_solver, angular_samples, plane='x
         enhancements = christoffel_solver.get_enhancement(approx=approx)
         # Collect enhancement for all requested wavemodes
         enhancement_values.append([enhancements[wm] for wm in wavemode])
-    
+        if weigh_by_x3_polarisation:
+            polarisation = christoffel_solver.get_eigenvec()
+            x3_polarisation.append([np.abs(polarisation[wm][2]) for wm in wavemode])
     # Convert to numpy arrays
     enhancement_values = np.array(enhancement_values)  # shape (samples, len(wavemode))
+    if weigh_by_x3_polarisation:
+        enhancement_values *= np.array(x3_polarisation)        
         
     # Handle negative enhancement values
     min_enhancement = np.min(enhancement_values)
-    max_enhancement = np.max(enhancement_values)
-    
+    # max_enhancement = np.max(enhancement_values)
     # Ensure all radii are positive
     if min_enhancement <= 0:
         # Shift all values to be positive
         enhancement_values = enhancement_values - min_enhancement + 0.1
         print(f"Warning: Negative enhancement values detected. Shifted by {-min_enhancement + 0.1:.3f}")
-    
+
+
     radii = enhancement_values.copy()
 
     if plot_dB:
@@ -1166,3 +1177,50 @@ def plot_enhancement_factors_slice(christoffel_solver, angular_samples, plane='x
     plt.show()
     
     return enhancement_values, radii
+
+
+def find_principal_energy_directions(christoffel_solver: Christoffel, samples_phi, samples_theta, approx=False,
+                                      wavemode=0, assume_symmetry=True, weigh_by_x3_polarisation=False):
+    from tqdm import tqdm 
+    
+    if christoffel_solver.stiffness is None:
+        raise ValueError("Please provide the christoffel solver initialized with a stiffness and density...")
+
+    # Validate wavemode selection
+    if wavemode not in [0, 1, 2]:
+        raise ValueError("wavemode must be 0, 1, or 2")
+        
+    theta_max = np.pi / 2 if assume_symmetry else 2 * np.pi 
+    phi_max   = np.pi / 2 if assume_symmetry else 2 * np.pi
+
+    phis, thetas = np.linspace(0, phi_max, samples_phi), np.linspace(0, theta_max, samples_theta)
+    phi_vals, theta_vals = np.meshgrid(phis, thetas)
+
+    # Reshape to get all combinations
+    phi_flat = phi_vals.flatten()
+    theta_flat = theta_vals.flatten()
+
+    # Store enhancement magnitudes
+    enhancement_magnitudes = np.empty(len(phi_flat))
+    combinations = len(phi_flat)
+    
+    # Add progress bar
+    pbar = tqdm(total=combinations, desc=f"Calculating points... Total:{combinations} - ")
+
+    # Iterate through all combinations
+    for i in range(combinations):
+        christoffel_solver.set_direction_spherical(theta_flat[i], phi_flat[i])
+        enhancements = christoffel_solver.get_enhancement(approx=approx)
+        # Store the magnitude of the enhancement for the selected wavemode
+        enhancement_magnitudes[i] = enhancements[wavemode]
+        if weigh_by_x3_polarisation:
+            enhancement_magnitudes[i] *= np.abs(christoffel_solver.get_eigenvec()[wavemode][2])
+
+        pbar.update(1)
+    pbar.close()
+    
+    # Sort enhancements by direction
+    sorted_indices = np.argsort(enhancement_magnitudes)[::-1]
+    return enhancement_magnitudes[sorted_indices], theta_flat[sorted_indices], phi_flat[sorted_indices]
+   
+    
